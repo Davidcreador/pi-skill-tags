@@ -1,10 +1,11 @@
 import { readFile } from "node:fs/promises";
 import * as path from "node:path";
 import { stripFrontmatter, type SlashCommandInfo, type Theme } from "@earendil-works/pi-coding-agent";
-import type {
-	AutocompleteItem,
-	AutocompleteProvider,
-	AutocompleteSuggestions,
+import {
+	fuzzyFilter,
+	type AutocompleteItem,
+	type AutocompleteProvider,
+	type AutocompleteSuggestions,
 } from "@earendil-works/pi-tui";
 
 export interface SkillCommand {
@@ -74,8 +75,7 @@ export function createSkillAutocompleteProvider(
 			const prefix = extractSkillPrefix((lines[cursorLine] ?? "").slice(0, cursorCol));
 			if (prefix === undefined) return current.getSuggestions(lines, cursorLine, cursorCol, options);
 			const query = prefix.replace(/^\$\[?/, "").toLocaleLowerCase();
-			const items = getSkills()
-				.filter((skill) => skill.name.toLocaleLowerCase().includes(query))
+			const items = fuzzyFilter(getSkills(), query, (skill) => skill.name)
 				.map((skill) => ({
 					value: skill.name,
 					label: skill.name,

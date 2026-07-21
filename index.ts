@@ -11,6 +11,7 @@ import {
 	EDITOR_COMPONENT_CHANGED_EVENT,
 	EDITOR_RENDER_HOOK,
 	expandSkillTags,
+	extractSkillPrefix,
 	getSkillCommands,
 	SKILL_TAGS_EDITOR_FACTORY,
 	type SkillCommand,
@@ -28,6 +29,35 @@ export function wrapEditorFactory(factory: EditorFactory | undefined, theme: The
 			get(target, property) {
 				if (property === "render") {
 					return (width: number) => decorateEditorLines(target.render(width), liveSkillNames, theme);
+				}
+				if (property === "handleInput") {
+					return (data: string) => {
+						const wrapped = target as EditorComponent & {
+							autocompleteState?: unknown;
+							tryTriggerAutocomplete?: (explicitTab?: boolean) => void;
+							state?: {
+								lines?: string[];
+								cursorLine?: number;
+								cursorCol?: number;
+							};
+						};
+						const beforeCursor =
+							typeof wrapped.state?.cursorLine === "number" && typeof wrapped.state?.cursorCol === "number"
+								? (wrapped.state.lines?.[wrapped.state.cursorLine] ?? "").slice(0, wrapped.state.cursorCol)
+								: undefined;
+						if (
+							beforeCursor !== undefined &&
+							extractSkillPrefix(beforeCursor) !== undefined &&
+							!wrapped.autocompleteState &&
+							typeof wrapped.tryTriggerAutocomplete === "function" &&
+							keybindings.matches(data, "tui.input.tab")
+						) {
+							wrapped.tryTriggerAutocomplete(true);
+							return;
+						}
+						const value = Reflect.get(target, property, target);
+						return typeof value === "function" ? value.call(target, data) : value;
+					};
 				}
 				const value = Reflect.get(target, property, target);
 				return typeof value === "function" ? value.bind(target) : value;
