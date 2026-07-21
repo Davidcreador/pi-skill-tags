@@ -151,7 +151,7 @@ test("unknown and unreadable tags stay unchanged", async () => {
 	assert.equal(mixed?.userMessage, "project-one and $[global-one]");
 });
 
-test("editor lifecycle restores hook, avoids wrapper stacking, and rewraps editor-change events", async () => {
+test("editor lifecycle installs lazily on first skill autocomplete use and then rewraps editor-change events", async () => {
 	const handlers = new Map<string, (...args: any[]) => any>();
 	const eventHandlers = new Map<string, (payload: unknown) => void>();
 	const events = {
@@ -173,29 +173,33 @@ test("editor lifecycle restores hook, avoids wrapper stacking, and rewraps edito
 	const stockFactory = () => ({ render: () => ["$[project-one]"] });
 	let current: any = stockFactory;
 	let setCalls = 0;
+	let autocompleteFactory: ((current: AutocompleteProvider) => AutocompleteProvider) | undefined;
 	const ctx = {
 		ui: {
 			theme,
 			getEditorComponent: () => current,
 			setEditorComponent: (factory: any) => { current = factory; setCalls++; },
-			addAutocompleteProvider: () => {},
+			addAutocompleteProvider: (factory: (current: AutocompleteProvider) => AutocompleteProvider) => {
+				autocompleteFactory = factory;
+			},
 		},
 	} as any;
 
 	skillTags(pi);
 	await handlers.get("session_start")?.({}, ctx);
-	assert.equal(setCalls, 1);
-	assert.equal(current[SKILL_TAGS_EDITOR_FACTORY], true);
-	installSkillTagsEditor(ctx);
-	assert.equal(setCalls, 1, "repeated install does not stack proxies");
-
-	await handlers.get("session_shutdown")?.({}, ctx);
-	assert.equal((globalThis as Record<PropertyKey, unknown>)[EDITOR_RENDER_HOOK], undefined);
-	assert.equal(eventHandlers.has(EDITOR_COMPONENT_CHANGED_EVENT), false, "shutdown removes owned editor-change listener");
-	await handlers.get("session_start")?.({}, ctx);
+	assert.equal(setCalls, 0, "session start should not wrap the editor eagerly");
 	assert.equal(typeof (globalThis as Record<PropertyKey, unknown>)[EDITOR_RENDER_HOOK], "function", "session start restores owned hook");
-	assert.equal(eventHandlers.has(EDITOR_COMPONENT_CHANGED_EVENT), true, "session start restores editor-change listener");
-	assert.equal(setCalls, 1, "session restart keeps the existing marked wrapper");
+	assert.equal(eventHandlers.has(EDITOR_COMPONENT_CHANGED_EVENT), false, "editor-change listener stays idle until wrapping is enabled");
+	assert.ok(autocompleteFactory, "session start registers the autocomplete provider");
+
+	const provider = autocompleteFactory!(fallback);
+	await provider.getSuggestions(["$[proj"], 0, 6, { signal: new AbortController().signal });
+	await new Promise((resolve) => setTimeout(resolve, 0));
+	assert.equal(setCalls, 1, "first skill autocomplete use installs the wrapper lazily");
+	assert.equal(current[SKILL_TAGS_EDITOR_FACTORY], true);
+	assert.equal(eventHandlers.has(EDITOR_COMPONENT_CHANGED_EVENT), true, "lazy install also enables future rewraps");
+	installSkillTagsEditor(ctx);
+	assert.equal(setCalls, 1, "repeated install does not stack wrappers");
 
 	const uiPackFactory = () => ({ render: () => ["$[project-one]"] });
 	current = uiPackFactory;
@@ -205,6 +209,12 @@ test("editor lifecycle restores hook, avoids wrapper stacking, and rewraps edito
 	assert.equal(current[SKILL_TAGS_EDITOR_FACTORY], true);
 	const editor = current(undefined, undefined, undefined);
 	assert.ok(editor.render(80)[0].includes("✦"), "changed current editor is decorated");
+
+	await handlers.get("session_shutdown")?.({}, ctx);
+	assert.equal((globalThis as Record<PropertyKey, unknown>)[EDITOR_RENDER_HOOK], undefined);
+	assert.equal(eventHandlers.has(EDITOR_COMPONENT_CHANGED_EVENT), false, "shutdown removes owned editor-change listener");
+	await handlers.get("session_start")?.({}, ctx);
+	assert.equal(setCalls, 2, "session restart still keeps wrapping lazy");
 
 	const foreignHook = () => ["foreign"];
 	(globalThis as Record<PropertyKey, unknown>)[EDITOR_RENDER_HOOK] = foreignHook;
