@@ -46,11 +46,31 @@ const skills: SkillCommand[] = [
 	},
 ];
 
+function makeEditorStub(text: string, overrides: Record<string, unknown> = {}) {
+	const state = {
+		lines: [text],
+		cursorLine: 0,
+		cursorCol: text.length,
+	};
+	return {
+		render: () => [],
+		handleInput: () => {},
+		getText: () => state.lines.join("\n"),
+		setText: (next: string) => {
+			state.lines = [next];
+			state.cursorLine = 0;
+			state.cursorCol = next.length;
+		},
+		invalidate: () => {},
+		state,
+		...overrides,
+	};
+}
+
 test("skill prefix Tab opens autocomplete instead of forwarding directly to editor", () => {
 	let forwarded = 0;
 	let triggered = 0;
-	const wrappedFactory = wrapEditorFactory(() => ({
-		render: () => [],
+	const wrappedFactory = wrapEditorFactory(() => makeEditorStub("$ppt-master", {
 		handleInput: () => {
 			forwarded += 1;
 		},
@@ -59,11 +79,6 @@ test("skill prefix Tab opens autocomplete instead of forwarding directly to edit
 			triggered += 1;
 		},
 		autocompleteState: null,
-		state: {
-			lines: ["$ppt-master"],
-			cursorLine: 0,
-			cursorCol: "$ppt-master".length,
-		},
 	}), theme);
 
 	const editor = wrappedFactory(tui, editorTheme, keybindings);
@@ -92,8 +107,7 @@ test("fuzzy matching finds hyphenated skill names from compact queries", async (
 test("Tab falls through once autocomplete is already open", () => {
 	let forwarded = 0;
 	let triggered = 0;
-	const wrappedFactory = wrapEditorFactory(() => ({
-		render: () => [],
+	const wrappedFactory = wrapEditorFactory(() => makeEditorStub("$ppt-master", {
 		handleInput: () => {
 			forwarded += 1;
 		},
@@ -101,11 +115,6 @@ test("Tab falls through once autocomplete is already open", () => {
 			triggered += 1;
 		},
 		autocompleteState: "regular",
-		state: {
-			lines: ["$ppt-master"],
-			cursorLine: 0,
-			cursorCol: "$ppt-master".length,
-		},
 	}), theme);
 
 	const editor = wrappedFactory(tui, editorTheme, keybindings);
