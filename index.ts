@@ -4,10 +4,11 @@ import {
 	type ExtensionContext,
 	type Theme,
 } from "@earendil-works/pi-coding-agent";
-import type { EditorComponent } from "@earendil-works/pi-tui";
+import { matchesKey, type EditorComponent } from "@earendil-works/pi-tui";
 import {
 	createSkillAutocompleteProvider,
 	decorateEditorLines,
+	deleteSkillTagAtCursor,
 	EDITOR_COMPONENT_CHANGED_EVENT,
 	EDITOR_RENDER_HOOK,
 	expandSkillTags,
@@ -40,6 +41,11 @@ type WrappedEditor = EditorComponent & {
 	onAction?: (action: string, handler: () => void) => void;
 	autocompleteState?: unknown;
 	tryTriggerAutocomplete?: (explicitTab?: boolean) => void;
+	pushUndoSnapshot?: () => void;
+	setCursorCol?: (col: number) => void;
+	cancelAutocomplete?: () => void;
+	exitHistoryBrowsing?: () => void;
+	lastAction?: unknown;
 	state?: {
 		lines?: string[];
 		cursorLine?: number;
@@ -57,13 +63,20 @@ export class SkillTagsEditorWrapper implements EditorComponent {
 	private readonly inner: WrappedEditor;
 	private readonly theme: Theme;
 	private readonly keybindings: { matches(data: string, action: string): boolean };
+	private readonly getKnownSkillNames: () => ReadonlySet<string>;
 	private fallbackFocused = false;
 	private readonly fallbackActionHandlers = new Map<string, () => void>();
 
-	constructor(inner: WrappedEditor, theme: Theme, keybindings: { matches(data: string, action: string): boolean }) {
+	constructor(
+		inner: WrappedEditor,
+		theme: Theme,
+		keybindings: { matches(data: string, action: string): boolean },
+		getKnownSkillNames: () => ReadonlySet<string> = () => liveSkillNames,
+	) {
 		this.inner = inner;
 		this.theme = theme;
 		this.keybindings = keybindings;
+		this.getKnownSkillNames = getKnownSkillNames;
 	}
 
 	get focused(): boolean {
@@ -154,6 +167,10 @@ export class SkillTagsEditorWrapper implements EditorComponent {
 	}
 
 	handleInput(data: string): void {
+		const backward = this.keybindings.matches(data, "tui.editor.deleteCharBackward") || matchesKey(data, "shift+backspace");
+		const forward = this.keybindings.matches(data, "tui.editor.deleteCharForward") || matchesKey(data, "shift+delete");
+		if ((backward || forward) && this.deleteSkillTag(backward ? "backward" : "forward")) return;
+
 		const beforeCursor = getTextBeforeCursor(this.inner);
 		if (
 			beforeCursor !== undefined &&
@@ -166,6 +183,39 @@ export class SkillTagsEditorWrapper implements EditorComponent {
 			return;
 		}
 		this.inner.handleInput(data);
+	}
+
+	private deleteSkillTag(direction: "backward" | "forward"): boolean {
+		const state = this.inner.state;
+		if (
+			!state ||
+			!Array.isArray(state.lines) ||
+			typeof state.cursorLine !== "number" ||
+			typeof state.cursorCol !== "number" ||
+			typeof this.inner.pushUndoSnapshot !== "function" ||
+			typeof this.inner.setCursorCol !== "function"
+		) {
+			return false;
+		}
+
+		const result = deleteSkillTagAtCursor(
+			state.lines,
+			state.cursorLine,
+			state.cursorCol,
+			direction,
+			this.getKnownSkillNames(),
+		);
+		if (!result) return false;
+
+		this.inner.cancelAutocomplete?.();
+		this.inner.exitHistoryBrowsing?.();
+		this.inner.lastAction = null;
+		this.inner.pushUndoSnapshot();
+		state.lines = result.lines;
+		state.cursorLine = result.cursorLine;
+		this.inner.setCursorCol(result.cursorCol);
+		this.inner.onChange?.(this.inner.getText());
+		return true;
 	}
 
 	getText(): string {

@@ -2,6 +2,12 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+### Added
+
+- Atomic Backspace and Delete handling for known skill tags, with single-step undo.
+
 ## [0.1.1] - 2026-07-14
 
 ### Added

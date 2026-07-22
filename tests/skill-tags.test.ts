@@ -8,6 +8,7 @@ import {
 	applySkillCompletion,
 	createSkillAutocompleteProvider,
 	decorateSkillTags,
+	deleteSkillTagAtCursor,
 	EDITOR_COMPONENT_CHANGED_EVENT,
 	EDITOR_RENDER_HOOK,
 	expandSkillTags,
@@ -70,6 +71,37 @@ test("completion consumes the current token and inserts spacing only when useful
 	assert.deepEqual(applySkillCompletion(["$pony tail"], 0, 5, item, "$pony"), { lines: ["$[ponytail] tail"], cursorLine: 0, cursorCol: 11 });
 	assert.deepEqual(applySkillCompletion(["$pony,next"], 0, 5, item, "$pony"), { lines: ["$[ponytail],next"], cursorLine: 0, cursorCol: 11 });
 	assert.deepEqual(applySkillCompletion(["try $pony"], 0, 9, item, "$pony"), { lines: ["try $[ponytail] "], cursorLine: 0, cursorCol: 16 });
+});
+
+test("backward deletion removes a complete known skill tag", () => {
+	const text = "Use $[project-one] now";
+	const cursorCol = text.indexOf("]") + 1;
+	assert.deepEqual(
+		deleteSkillTagAtCursor([text], 0, cursorCol, "backward", new Set(["project-one"])),
+		{ lines: ["Use  now"], cursorLine: 0, cursorCol: 4 },
+	);
+});
+
+test("forward deletion removes a complete known skill tag", () => {
+	const text = "Use $[project-one] now";
+	const cursorCol = text.indexOf("$[");
+	assert.deepEqual(
+		deleteSkillTagAtCursor([text], 0, cursorCol, "forward", new Set(["project-one"])),
+		{ lines: ["Use  now"], cursorLine: 0, cursorCol: 4 },
+	);
+});
+
+test("deletion treats the inside of known tags as atomic but leaves unknown tags alone", () => {
+	const text = "$[project-one] $[missing]";
+	assert.deepEqual(
+		deleteSkillTagAtCursor([text], 0, 5, "backward", new Set(["project-one"])),
+		{ lines: [" $[missing]"], cursorLine: 0, cursorCol: 0 },
+	);
+	assert.deepEqual(
+		deleteSkillTagAtCursor([text], 0, 5, "forward", new Set(["project-one"])),
+		{ lines: [" $[missing]"], cursorLine: 0, cursorCol: 0 },
+	);
+	assert.equal(deleteSkillTagAtCursor([text], 0, text.length, "backward", new Set(["project-one"])), undefined);
 });
 
 test("skill provider delegates dollar-prefixed no-match suggestions and completions", async () => {
