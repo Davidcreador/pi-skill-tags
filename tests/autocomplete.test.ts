@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CURSOR_MARKER } from "@earendil-works/pi-tui";
+import { CustomEditor } from "@earendil-works/pi-coding-agent";
+import { CURSOR_MARKER, KeybindingsManager, setKeybindings, TUI_KEYBINDINGS } from "@earendil-works/pi-tui";
 import { SkillTagsEditorWrapper, wrapEditorFactory } from "../index.ts";
 import { createSkillAutocompleteProvider, type SkillCommand } from "../skill-tags.ts";
 
@@ -68,6 +69,21 @@ function makeEditorStub(text: string, overrides: Record<string, unknown> = {}) {
 	};
 }
 
+function makeWrappedCustomEditor(text: string, knownNames: string[]) {
+	const manager = new KeybindingsManager(TUI_KEYBINDINGS);
+	setKeybindings(manager);
+	const inner = new CustomEditor(
+		{ terminal: { rows: 24 }, requestRender() {} } as any,
+		{ borderColor: (value: string) => value, selectList: {} } as any,
+		manager as any,
+	);
+	inner.setText(text);
+	return {
+		inner,
+		wrapper: new SkillTagsEditorWrapper(inner as any, theme, manager, () => new Set(knownNames)),
+	};
+}
+
 test("wrapper forwards focus so cursor markers still render", () => {
 	const inner = makeEditorStub("$[ppt-master]", {
 		focused: false,
@@ -103,6 +119,33 @@ test("skill prefix Tab opens autocomplete instead of forwarding directly to edit
 
 	assert.equal(triggered, 1);
 	assert.equal(forwarded, 0);
+});
+
+test("wrapper deletes a completed skill chip in one Backspace and undo restores it", () => {
+	const original = "Use $[ppt-master] ";
+	const { wrapper } = makeWrappedCustomEditor(original, ["ppt-master"]);
+
+	wrapper.handleInput("\x7f");
+	assert.equal(wrapper.getText(), "Use ");
+
+	wrapper.handleInput("\x1f");
+	assert.equal(wrapper.getText(), original);
+});
+
+test("wrapper handles forward Delete at the start of a known skill tag", () => {
+	const { inner, wrapper } = makeWrappedCustomEditor("Use $[ppt-master] now", ["ppt-master"]);
+	inner.handleInput("\x1b[H");
+	for (let index = 0; index < "Use ".length; index++) inner.handleInput("\x1b[C");
+
+	wrapper.handleInput("\x1b[3~");
+	assert.equal(wrapper.getText(), "Use  now");
+});
+
+test("wrapper delegates deletion for tags that are not loaded skills", () => {
+	const { wrapper } = makeWrappedCustomEditor("$[unknown]", []);
+
+	wrapper.handleInput("\x7f");
+	assert.equal(wrapper.getText(), "$[unknown");
 });
 
 test("fuzzy ranking prefers speak-human-tw for $sp", async () => {

@@ -47,6 +47,36 @@ export function extractSkillPrefix(textBeforeCursor: string): string | undefined
 	return textBeforeCursor.match(/(?:^|\s)(\$\[?[^\s\]]*)$/)?.[1];
 }
 
+export type SkillTagDeletionDirection = "backward" | "forward";
+
+export function deleteSkillTagAtCursor(
+	lines: string[],
+	cursorLine: number,
+	cursorCol: number,
+	direction: SkillTagDeletionDirection,
+	knownNames: ReadonlySet<string>,
+): { lines: string[]; cursorLine: number; cursorCol: number } | undefined {
+	const line = lines[cursorLine];
+	if (line === undefined) return undefined;
+
+	for (const match of line.matchAll(new RegExp(TAG_RE.source, TAG_RE.flags))) {
+		const start = match.index;
+		const end = start + match[0].length;
+		const cursorAfterTrailingSpace = direction === "backward" && cursorCol === end + 1 && line[end] === " ";
+		const touchesTag = direction === "backward"
+			? (cursorCol > start && cursorCol <= end) || cursorAfterTrailingSpace
+			: cursorCol >= start && cursorCol < end;
+		if (!touchesTag || !knownNames.has(match[1])) continue;
+
+		const next = [...lines];
+		const deleteEnd = cursorAfterTrailingSpace ? end + 1 : end;
+		next[cursorLine] = line.slice(0, start) + line.slice(deleteEnd);
+		return { lines: next, cursorLine, cursorCol: start };
+	}
+
+	return undefined;
+}
+
 export function applySkillCompletion(
 	lines: string[],
 	cursorLine: number,
@@ -156,7 +186,7 @@ export async function expandSkillTags(
 	const loaded = [...loadedByName.values()];
 	if (loaded.length === 0) return text;
 
-	const readableMessage = text.replace(TAG_RE, (token, name: string) => loadedByName.has(name) ? name : token);
+	const readableMessage = text.replace(TAG_RE, (token, name: string) => loadedByName.has(name) ? `$${name}` : token);
 	const nonTagText = text.replace(TAG_RE, (token, name: string) => loadedByName.has(name) ? "" : token).trim();
 	const block = renderSkillBlock(loaded);
 	return nonTagText ? `${block}\n\n${readableMessage}` : block;

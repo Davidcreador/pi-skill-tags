@@ -2,6 +2,16 @@
 
 All notable changes to this project are documented in this file.
 
+## Unreleased
+
+### Added
+
+- Atomic Backspace and Delete handling for known skill tags, with single-step undo.
+
+### Changed
+
+- Preserve a `$` prefix on expanded skill names in the model-visible user message.
+
 ## [0.1.1] - 2026-07-14
 
 ### Added

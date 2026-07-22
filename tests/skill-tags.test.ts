@@ -8,6 +8,7 @@ import {
 	applySkillCompletion,
 	createSkillAutocompleteProvider,
 	decorateSkillTags,
+	deleteSkillTagAtCursor,
 	EDITOR_COMPONENT_CHANGED_EVENT,
 	EDITOR_RENDER_HOOK,
 	expandSkillTags,
@@ -72,6 +73,37 @@ test("completion consumes the current token and inserts spacing only when useful
 	assert.deepEqual(applySkillCompletion(["try $pony"], 0, 9, item, "$pony"), { lines: ["try $[ponytail] "], cursorLine: 0, cursorCol: 16 });
 });
 
+test("backward deletion removes a complete known skill tag", () => {
+	const text = "Use $[project-one] now";
+	const cursorCol = text.indexOf("]") + 1;
+	assert.deepEqual(
+		deleteSkillTagAtCursor([text], 0, cursorCol, "backward", new Set(["project-one"])),
+		{ lines: ["Use  now"], cursorLine: 0, cursorCol: 4 },
+	);
+});
+
+test("forward deletion removes a complete known skill tag", () => {
+	const text = "Use $[project-one] now";
+	const cursorCol = text.indexOf("$[");
+	assert.deepEqual(
+		deleteSkillTagAtCursor([text], 0, cursorCol, "forward", new Set(["project-one"])),
+		{ lines: ["Use  now"], cursorLine: 0, cursorCol: 4 },
+	);
+});
+
+test("deletion treats the inside of known tags as atomic but leaves unknown tags alone", () => {
+	const text = "$[project-one] $[missing]";
+	assert.deepEqual(
+		deleteSkillTagAtCursor([text], 0, 5, "backward", new Set(["project-one"])),
+		{ lines: [" $[missing]"], cursorLine: 0, cursorCol: 0 },
+	);
+	assert.deepEqual(
+		deleteSkillTagAtCursor([text], 0, 5, "forward", new Set(["project-one"])),
+		{ lines: [" $[missing]"], cursorLine: 0, cursorCol: 0 },
+	);
+	assert.equal(deleteSkillTagAtCursor([text], 0, text.length, "backward", new Set(["project-one"])), undefined);
+});
+
 test("skill provider delegates dollar-prefixed no-match suggestions and completions", async () => {
 	let applied = false;
 	const dollarProvider: AutocompleteProvider = {
@@ -100,13 +132,30 @@ test("single tag emits Pi core's parseable block and tag-only input has no user 
 	assert.ok(!expanded.includes("description: x"));
 });
 
-test("inline tag becomes a readable skill name without leaking its body into user text", async () => {
+test("inline tag keeps a dollar-prefixed skill name without leaking its body into user text", async () => {
 	const parsed = parseSkillBlock(await expandSkillTags("Use $[project-one] now.", [project], loadSkill));
 	assert.ok(parsed);
-	assert.equal(parsed.userMessage, "Use project-one now.");
+	assert.equal(parsed.userMessage, "Use $project-one now.");
 	assert.ok(parsed.content.includes("Project body"));
 	assert.ok(!parsed.userMessage?.includes("Project body"));
 	assert.ok(!parsed.userMessage?.includes("<skill"));
+});
+
+test("known skill tags keep a dollar prefix in the model-visible user message", async () => {
+	const handoff: SkillCommand = { name: "handoff-out", path: "/skills/handoff-out/SKILL.md", scope: "user" };
+	const grill: SkillCommand = { name: "grill-with-docs-lqy", path: "/skills/grill-with-docs-lqy/SKILL.md", scope: "user" };
+	const content = {
+		[handoff.path]: "Handoff body",
+		[grill.path]: "Grill body",
+	};
+	const parsed = parseSkillBlock(await expandSkillTags(
+		"$[handoff-out] needs multilingual support; use $[grill-with-docs-lqy] to discuss it.",
+		[handoff, grill],
+		async (filePath) => content[filePath],
+	));
+
+	assert.ok(parsed);
+	assert.equal(parsed.userMessage, "$handoff-out needs multilingual support; use $grill-with-docs-lqy to discuss it.");
 });
 
 test("multiple unique tags emit one aggregate parseable block with separated sections", async () => {
@@ -123,7 +172,7 @@ test("multiple unique tags emit one aggregate parseable block with separated sec
 	assert.equal(parsed.location, "multiple skills");
 	assert.match(parsed.content, /Name: project-one\nPath: \/repo\/\.pi\/skills\/project-one\/SKILL\.md\nBase directory: \/repo\/\.pi\/skills\/project-one\nBody:\nProject body/);
 	assert.match(parsed.content, /---\n\nName: odd\nPath: \/tmp\/a&b\/SKILL\.md\nBase directory: \/tmp\/a&b\nBody:\nOdd body/);
-	assert.equal(parsed.userMessage, "Start project-one, then odd; keep $[missing].");
+	assert.equal(parsed.userMessage, "Start $project-one, then $odd; keep $[missing].");
 	assert.equal((expanded.match(/<\/skill>/g) ?? []).length, 1, "aggregate has only its top-level closing tag");
 	assert.ok(!parsed.userMessage.includes("Odd body"));
 });
@@ -148,7 +197,7 @@ test("unknown and unreadable tags stay unchanged", async () => {
 		if (filePath === globalSkill.path) throw new Error("nope");
 		return loadSkill(filePath);
 	}));
-	assert.equal(mixed?.userMessage, "project-one and $[global-one]");
+	assert.equal(mixed?.userMessage, "$project-one and $[global-one]");
 });
 
 test("editor lifecycle installs lazily on first skill autocomplete use and then rewraps editor-change events", async () => {
