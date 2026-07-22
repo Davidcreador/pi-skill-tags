@@ -28,7 +28,7 @@ Submitted prompt
   …trusted instructions from both skills…
 </skill>
 
-Review this diff with review-code then write-tests
+Review this diff with $review-code then $write-tests
 ```
 
 The chip is cosmetic. The underlying editor text remains `$[review-code]` or `$[write-tests]`.
@@ -76,7 +76,7 @@ Multiple tags collapse into one Pi skill invocation. Repeated tags load the skil
 Use $[review-code] on this diff, then $[write-tests] for the fix.
 ```
 
-Unknown tags stay as plain text rather than being removed.
+Known tags keep a `$` prefix in the model-visible prompt, so skill references remain explicit. Unknown tags stay unchanged.
 
 ## Compatibility
 

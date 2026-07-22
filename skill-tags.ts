@@ -186,7 +186,7 @@ export async function expandSkillTags(
 	const loaded = [...loadedByName.values()];
 	if (loaded.length === 0) return text;
 
-	const readableMessage = text.replace(TAG_RE, (token, name: string) => loadedByName.has(name) ? name : token);
+	const readableMessage = text.replace(TAG_RE, (token, name: string) => loadedByName.has(name) ? `$${name}` : token);
 	const nonTagText = text.replace(TAG_RE, (token, name: string) => loadedByName.has(name) ? "" : token).trim();
 	const block = renderSkillBlock(loaded);
 	return nonTagText ? `${block}\n\n${readableMessage}` : block;
